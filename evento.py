@@ -1,8 +1,11 @@
-from typing import List
-from fastapi import FastAPI, HTTPException
+from typing import Annotated, Union, Optional, List
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Union
+from passlib.context import CryptContext
+from jose import JWTError, jwt
 
 app = FastAPI()
 
