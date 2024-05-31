@@ -59,7 +59,16 @@ def update_evento(id: int, evento: Evento):
     listaeventos[index] = evento
     return evento
 
-# Ruta para eliminar una evento por su ID
+# Ruta para agregar notas a un evento existente
+@app.post("/eventos/{id}/notas", response_model=Evento)
+def agregar_notas(id: int, notas: str):
+    index = next((i for i, e in enumerate(listaeventos) if e.id == id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    listaeventos[index].notas = notas
+    return listaeventos[index]
+
+# Ruta para eliminar un evento por su ID
 @app.delete("/eventos/{id}")
 def delete_evento(id: int):
     index = next((i for i, e in enumerate(listaeventos) if e.id == id), None)
