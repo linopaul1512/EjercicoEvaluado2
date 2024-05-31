@@ -1,50 +1,49 @@
-from typing import Annotated, Union, Optional, List
+from typing import List, Union, Annotated, Optional
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Union
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
+# Inicializa la aplicación FastAPI
 app = FastAPI()
 
+# Configuración del contexto de encriptación de contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Claves y configuración para el token JWT
 SECRET_KEY = "27A0D7C4CCCE76E6BE39225B7EEE8BD0EF890DE82D49E459F4C405C583080AB0"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
+# Base de datos simulada de usuarios
 dummy_users_db = {
-   "usuario": {
-    "username": "username",
-    "email": "username",
-    "hashed_password": "secret",
-    "full_name": "full_name",
-    "disabled": False
-   }
+    "johndoe": {
+        "username": "johndoe",
+        "email": "johndoe@example.com",
+        "full_name": "John Doe",
+        "hashed_password": "secret",  
+        "disabled": False
+    },
+    "alice": {
+        "username": "alice",
+        "email": "alice@example.com",
+        "full_name": "Alice Wonderson",
+        "hashed_password": "secret", 
+        "disabled": True
+    }
 }
 
-
-
+# Esquema de seguridad OAuth2 para obtener el token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+# Modelos Pydantic para la gestión de usuarios y tokens
 class User(BaseModel):
     username: str
-    email: Union[str, None] = None
-    full_name: Union[str, None] = None
-    disabled: Union[bool, None] = None
-    password:Union[bool, None] = None
-
-listausuarios = []
-# Ruta para crear una nuevo usuario
-@app.post("/usuarios/", response_model=User)
-def crear_usuarios(usuario: User):
-    if any(m.id == usuario.id for m in listausuarios):
-        raise HTTPException(status_code=400, detail="Usuario con este ID ya existe")
-    listausuarios.append(usuario)
-    return usuario
-
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = None
 
 class UserInDB(User):
     hashed_password: str
@@ -54,9 +53,10 @@ class Token(BaseModel):
     token_type: str
 
 class TokenData(BaseModel):
-    username: Union[str, None] = None
+    username: Optional[str] = None
 
-def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None):
+# Función para crear un token JWT
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -66,24 +66,36 @@ def create_access_token(data: dict, expires_delta: Union[timedelta, None] = None
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-def dumb_decode_token(token):
-    return User(username=token + "dummydecoded", email="john@example.com", full_name="John Doe")
+# Función para obtener el hash de una contraseña
+def get_password_hash(password: str):
+    return pwd_context.hash(password)
 
+# Función para verificar una contraseña en texto plano contra su hash
+def verify_password(plain_password: str, hashed_password: str):
+    return pwd_context.verify(plain_password, hashed_password)
+
+# Función para obtener un usuario de la base de datos simulada
 def get_user(db, username: str):
     if username in db:
         user_dict = db[username]
         return UserInDB(**user_dict)
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+# Función para autenticar un usuario verificando su contraseña
+def authenticate_user(fake_db, username: str, password: str):
+    user = get_user(fake_db, username)
+    if not user:
+        return False
+    if not verify_password(password, user.hashed_password):
+        return False
+    return user
 
+# Dependencia para obtener el usuario actual a partir del token
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
-    user = dumb_decode_token(token)
     credentials_exception = HTTPException(
-            status_code= status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication credentials",
+        headers={"WWW-Authenticate": "Bearer"}
+    )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
@@ -97,32 +109,46 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
         raise credentials_exception
     return user
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+# Ruta para registrar un nuevo usuario
+class UserCreate(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    password: str
+    
+#Ruta para crear usuario
+@app.post("/usuarios/", response_model=User)
+def crear_usuario(user: UserCreate):
+    hashed_password = get_password_hash(user.password)
+    user_in_db = UserInDB(
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        disabled=False,
+        hashed_password=hashed_password
+    )
+    if user_in_db.username in dummy_users_db:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    dummy_users_db[user_in_db.username] = user_in_db.dict()
+    return user_in_db
 
-def autheticate_user(fake_db, username: str, password: str):
-    user = get_user(fake_db, username)
-    if not user:
-        return False
-    hashed_password = get_password_hash(user.hashed_password)
-    if not verify_password(password, hashed_password):
-        return False
-    return user
-
-@app.get("/users/me")
-async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
-    return current_user
-
-@app.post("/token")
-async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> Token:
-    user = autheticate_user(dummy_users_db, form_data.username, form_data.password)
+# Ruta para iniciar sesión y obtener el token de acceso
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+    user = authenticate_user(dummy_users_db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
-            status_code= status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"})
+            headers={"WWW-Authenticate": "Bearer"}
+        )
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.username}, expires_delta=access_token_expires
     )
-    return Token(access_token= access_token, token_type= "bearer")
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# Ruta para obtener la información del usuario actual
+@app.get("/users/me", response_model=User)
+async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
+    return current_user
