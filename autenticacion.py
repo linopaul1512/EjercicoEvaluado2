@@ -6,154 +6,89 @@ from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 
-# Inicializa la aplicación FastAPI
-# Inicializa la aplicación FastAPI
+
 app = FastAPI()
 
-# Configuración del contexto de encriptación de contraseñas
-# Configuración del contexto de encriptación de contraseñas
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Lista que almacena todos los eventos
+listaeventos = []
 
-# Claves y configuración para el token JWT
-# Claves y configuración para el token JWT
-SECRET_KEY = "27A0D7C4CCCE76E6BE39225B7EEE8BD0EF890DE82D49E459F4C405C583080AB0"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Clase para manejar los datos de un evento
+class Evento(BaseModel):
+    id: int
+    titulo: str
+    descripcion: str
+    fecha: datetime
+    notas: Optional[str] = None  # Notas opcionales como un campo de cadena
+    fue_realizado: bool = False
 
-# Base de datos simulada de usuarios
-dummy_users_db = {
-    "johndoe": {
-        "username": "johndoe",
-        "email": "johndoe@example.com",
-        "full_name": "John Doe",
-        "hashed_password": "secret",  
-        "disabled": False
-    },
-    "alice": {
-        "username": "alice",
-        "email": "alice@example.com",
-        "full_name": "Alice Wonderson",
-        "hashed_password": "secret", 
-        "disabled": True
-    }
-}
+# Ruta para obtener todos los eventos
+@app.get("/eventos", response_model=List[Evento])
+def get_eventos() -> List[Evento]:
+    return listaeventos
 
-# Esquema de seguridad OAuth2 para obtener el token
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+# Ruta para obtener todos los eventos que ya se realizaron
+@app.get("/eventos/realizados", response_model=List[Evento])
+def get_eventos_realizados() -> List[Evento]:
+    eventos_realizados = [evento for evento in listaeventos if evento.fue_realizado]
+    return eventos_realizados
 
-# Modelos Pydantic para la gestión de usuarios y tokens
-# Modelos Pydantic para la gestión de usuarios y tokens
-class User(BaseModel):
-    username: str
-    email: Optional[str] = None
-    full_name: Optional[str] = None
-    disabled: Optional[bool] = None
+# Ruta para obtener todos los eventos que no se realizaron
+@app.get("/eventos/no-realizados", response_model=List[Evento])
+def get_eventos_no_realizados() -> List[Evento]:
+    eventos_no_realizados = [evento for evento in listaeventos if not evento.fue_realizado]
+    return eventos_no_realizados
 
-class UserInDB(User):
-    hashed_password: str
+# Ruta para crear un nuevo evento
+@app.post("/eventos/", response_model=Evento)
+def crear_evento(evento: Evento):
+    if any(e.id == evento.id for e in listaeventos):
+        raise HTTPException(status_code=400, detail="Evento con este ID ya existe")
+    listaeventos.append(evento)
+    return evento
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str
+# Ruta para obtener un evento por su ID
+@app.get("/eventos/{id}", response_model=Evento)
+def get_evento(id: int):
+    evento = next((e for e in listaeventos if e.id == id), None)
+    if evento is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    return evento
 
-class TokenData(BaseModel):
-    username: Optional[str] = None
+# Ruta para actualizar un evento existente
+@app.put("/eventos/{id}", response_model=Evento)
+def update_evento(id: int, evento: Evento):
+    index = next((i for i, e in enumerate(listaeventos) if e.id == id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    listaeventos[index] = evento
+    return evento
 
-# Función para crear un token JWT
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+# Ruta para agregar notas a un evento existente
+@app.post("/eventos/{id}/notas", response_model=Evento)
+def agregar_notas(id: int, notas: str):
+    index = next((i for i, e in enumerate(listaeventos) if e.id == id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    listaeventos[index].notas = notas
+    return listaeventos[index]
 
-# Función para obtener el hash de una contraseña
-def get_password_hash(password: str):
-    return pwd_context.hash(password)
+# Ruta para eliminar un evento por su ID
+@app.delete("/eventos/{id}")
+def delete_evento(id: int):
+    index = next((i for i, e in enumerate(listaeventos) if e.id == id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    del listaeventos[index]
+    return {"mensaje": "Evento eliminado exitosamente."}
 
-# Función para verificar una contraseña en texto plano contra su hash
-def verify_password(plain_password: str, hashed_password: str):
-    return pwd_context.verify(plain_password, hashed_password)
-
-# Función para obtener un usuario de la base de datos simulada
-def get_user(db, username: str):
-    if username in db:
-        user_dict = db[username]
-        return UserInDB(**user_dict)
-
-# Función para autenticar un usuario verificando su contraseña
-def authenticate_user(fake_db, username: str, password: str):
-    user = get_user(fake_db, username)
-    if not user:
-        return False
-    if not verify_password(password, user.hashed_password):
-        return False
-    return user
-
-# Dependencia para obtener el usuario actual a partir del token
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid authentication credentials",
-        headers={"WWW-Authenticate": "Bearer"}
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = TokenData(username=username)
-    except JWTError:
-        raise credentials_exception
-    user = get_user(dummy_users_db, username=token_data.username)
-    if user is None:
-        raise credentials_exception
-    return user
-
-# Ruta para registrar un nuevo usuario
-class UserCreate(BaseModel):
-    username: str
-    email: Optional[str] = None
-    full_name: Optional[str] = None
-    password: str
-    
-#Ruta para crear usuario
-@app.post("/usuarios/", response_model=User)
-def crear_usuario(user: UserCreate):
-    hashed_password = get_password_hash(user.password)
-    user_in_db = UserInDB(
-        username=user.username,
-        email=user.email,
-        full_name=user.full_name,
-        disabled=False,
-        hashed_password=hashed_password
-    )
-    if user_in_db.username in dummy_users_db:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    dummy_users_db[user_in_db.username] = user_in_db.dict()
-    return user_in_db
-
-# Ruta para iniciar sesión y obtener el token de acceso
-@app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
-    user = authenticate_user(dummy_users_db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
-
-# Ruta para obtener la información del usuario actual
-@app.get("/users/me", response_model=User)
-async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
-    return current_user
+# Ruta para eliminar un evento si NO se ha realizado
+@app.delete("/eventos/no-realizado/{id}")
+def delete_evento_no_realizado(id: int):
+    index = next((i for i, e in enumerate(listaeventos) if e.id == id), None)
+    if index is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    evento = listaeventos[index]
+    if evento.fue_realizado:
+        raise HTTPException(status_code=400, detail="No se puede eliminar un evento que ya se ha realizado")
+    del listaeventos[index]
+    return {"mensaje": "Evento eliminado exitosamente."}
