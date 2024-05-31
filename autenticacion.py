@@ -7,11 +7,14 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 
 # Inicializa la aplicación FastAPI
+# Inicializa la aplicación FastAPI
 app = FastAPI()
 
 # Configuración del contexto de encriptación de contraseñas
+# Configuración del contexto de encriptación de contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Claves y configuración para el token JWT
 # Claves y configuración para el token JWT
 SECRET_KEY = "27A0D7C4CCCE76E6BE39225B7EEE8BD0EF890DE82D49E459F4C405C583080AB0"
 ALGORITHM = "HS256"
@@ -38,6 +41,7 @@ dummy_users_db = {
 # Esquema de seguridad OAuth2 para obtener el token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+# Modelos Pydantic para la gestión de usuarios y tokens
 # Modelos Pydantic para la gestión de usuarios y tokens
 class User(BaseModel):
     username: str
@@ -138,6 +142,7 @@ async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm,
     user = authenticate_user(dummy_users_db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
             headers={"WWW-Authenticate": "Bearer"}
